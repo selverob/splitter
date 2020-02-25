@@ -1,5 +1,6 @@
 use chrono::NaiveDate;
 use rust_decimal::Decimal;
+use rust_decimal_macros::*;
 use std::collections::HashMap;
 
 pub struct Transaction {
@@ -21,13 +22,13 @@ impl Transaction {
         let curr_amount = if self.changes.contains_key(&account) {
             self.changes[&account]
         } else {
-            Decimal::new(0, 0)
+            dec!(0)
         };
         self.changes.insert(account, curr_amount + amount);
     }
 
     fn add_split_change(&mut self, account: String, split_account: String, amount: Decimal) {
-        let half = amount / Decimal::new(2, 0);
+        let half = amount / dec!(2);
         self.add_change(account, half);
         self.add_change(split_account, half);
     }
@@ -43,7 +44,6 @@ impl Transaction {
 
 mod test {
     use super::*;
-    use rust_decimal_macros::*;
 
     #[test]
     fn tx_creation() {
