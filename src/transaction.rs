@@ -3,10 +3,13 @@ use rust_decimal::Decimal;
 use rust_decimal_macros::*;
 use std::collections::HashMap;
 
+#[derive(Clone, Debug, PartialEq)]
+pub struct Amount(pub String, pub Decimal);
+
 pub struct Transaction {
     date: NaiveDate,
     description: String,
-    changes: HashMap<String, Decimal>,
+    changes: HashMap<String, Vec<Amount>>,
 }
 
 impl Transaction {
@@ -18,27 +21,45 @@ impl Transaction {
         }
     }
 
-    fn add_change(&mut self, account: String, amount: Decimal) {
-        let curr_amount = if self.changes.contains_key(&account) {
-            self.changes[&account]
-        } else {
-            dec!(0)
-        };
-        self.changes.insert(account, curr_amount + amount);
+    fn add_change(&mut self, account: &str, amount: Amount) {
+        self.changes
+            .entry(account.to_owned())
+            .and_modify(|v| {
+                if let Some(pos) = v.iter().position(|am| am.0 == amount.0) {
+                    v[pos].1 = v[pos].1 + amount.1;
+                } else {
+                    v.push(amount.clone());
+                }
+            })
+            .or_insert(vec![amount]);
     }
 
-    fn add_split_change(&mut self, account: String, split_account: String, amount: Decimal) {
-        let half = amount / dec!(2);
-        self.add_change(account, half);
+    fn add_split_change(&mut self, account: &str, split_account: &str, amount: Amount) {
+        let half = Amount(amount.0, amount.1 / dec!(2));
+        self.add_change(account, half.clone());
         self.add_change(split_account, half);
     }
 
-    fn balance(&self) -> Decimal {
-        self.changes.values().map(|amount| *amount).sum()
+    fn balance(&self) -> Vec<Amount> {
+        let mut balances = HashMap::new();
+        for amounts in self.changes.values() {
+            for amount in amounts {
+                balances
+                    .entry(&amount.0)
+                    .and_modify(|a: &mut Decimal| *a = amount.1 + *a)
+                    .or_insert(amount.1);
+            }
+        }
+        balances
+            .iter()
+            .map(|(currency, balance)| Amount(currency.to_string(), *balance))
+            .collect()
     }
 
     fn finalize(&mut self, account: String) {
-        self.add_change(account, -self.balance());
+        for amount in self.balance() {
+            self.add_change(&account, Amount(amount.0, -amount.1));
+        }
     }
 }
 
@@ -47,7 +68,10 @@ mod test {
 
     #[test]
     fn tx_creation() {
-        let tx = Transaction::new(NaiveDate::from_ymd(2020, 01, 10), "Test transaction".to_owned());
+        let tx = Transaction::new(
+            NaiveDate::from_ymd(2020, 01, 10),
+            "Test transaction".to_owned(),
+        );
         assert_eq!(tx.date, NaiveDate::from_ymd(2020, 01, 10));
         assert_eq!(tx.description, "Test transaction".to_owned());
         assert_eq!(tx.changes.len(), 0);
@@ -55,32 +79,103 @@ mod test {
 
     #[test]
     fn simple_changes() {
-        let mut tx = Transaction::new(NaiveDate::from_ymd(2020, 01, 10), "Test transaction".to_owned());
-        tx.add_change("Expenses::Food".to_owned(), dec!(5.95));
-        tx.add_change("Expenses::Hygiene".to_owned(), dec!(3.90));
-        tx.add_change("Expenses::Food".to_owned(), dec!(2));
-        assert_eq!(tx.changes["Expenses::Food"], dec!(7.95));
-        assert_eq!(tx.changes["Expenses::Hygiene"], dec!(3.90));
-        assert_eq!(tx.balance(), dec!(11.85))
+        let mut tx = Transaction::new(
+            NaiveDate::from_ymd(2020, 01, 10),
+            "Test transaction".to_owned(),
+        );
+        tx.add_change(&"Expenses::Food", Amount("€".to_owned(), dec!(5.95)));
+        tx.add_change(&"Expenses::Hygiene", Amount("€".to_owned(), dec!(3.90)));
+        tx.add_change(&"Expenses::Hygiene", Amount("CZK".to_owned(), dec!(25)));
+        tx.add_change(&"Expenses::Hygiene", Amount("CZK".to_owned(), dec!(13)));
+        tx.add_change(&"Expenses::Food", Amount("€".to_owned(), dec!(2)));
+        tx.add_change(&"Expenses::Food", Amount("CZK".to_owned(), dec!(120)));
+        assert_eq!(
+            tx.changes["Expenses::Food"],
+            vec![
+                Amount("€".to_owned(), dec!(7.95)),
+                Amount("CZK".to_owned(), dec!(120))
+            ]
+        );
+        assert_eq!(
+            tx.changes["Expenses::Hygiene"],
+            vec![
+                Amount("€".to_owned(), dec!(3.90)),
+                Amount("CZK".to_owned(), dec!(38))
+            ]
+        );
+        assert_eq!(
+            tx.balance(),
+            vec![
+                Amount("€".to_owned(), dec!(11.85)),
+                Amount("CZK".to_owned(), dec!(158))
+            ]
+        );
     }
 
     #[test]
     fn split_changes() {
-        let mut tx = Transaction::new(NaiveDate::from_ymd(2020, 01, 10), "Test transaction".to_owned());
-        tx.add_split_change("Expenses::Food".to_owned(), "Debts::Peter".to_owned(), dec!(7));
-        tx.add_change("Expenses::Food".to_owned(), dec!(2));
-        assert_eq!(tx.changes["Expenses::Food"], dec!(5.50));
-        assert_eq!(tx.changes["Debts::Peter"], dec!(3.50));
-        assert_eq!(tx.balance(), dec!(9))
+        let mut tx = Transaction::new(
+            NaiveDate::from_ymd(2020, 01, 10),
+            "Test transaction".to_owned(),
+        );
+        tx.add_split_change(
+            "Expenses::Food",
+            "Debts::Peter",
+            Amount("€".to_owned(), dec!(7)),
+        );
+        tx.add_split_change(
+            "Expenses::Food",
+            "Debts::Peter",
+            Amount("CZK".to_owned(), dec!(120)),
+        );
+        tx.add_change("Expenses::Food", Amount("€".to_owned(), dec!(2)));
+        assert_eq!(
+            tx.changes["Expenses::Food"],
+            vec![
+                Amount("€".to_owned(), dec!(5.50)),
+                Amount("CZK".to_owned(), dec!(60))
+            ]
+        );
+        assert_eq!(
+            tx.changes["Debts::Peter"],
+            vec![
+                Amount("€".to_owned(), dec!(3.50)),
+                Amount("CZK".to_owned(), dec!(60))
+            ]
+        );
+        assert_eq!(
+            tx.balance(),
+            vec![
+                Amount("€".to_owned(), dec!(9)),
+                Amount("CZK".to_owned(), dec!(120))
+            ]
+        )
     }
 
     #[test]
     fn finalization() {
-        let mut tx = Transaction::new(NaiveDate::from_ymd(2020, 01, 10), "Test transaction".to_owned());
-        tx.add_change("Expenses::Food".to_owned(), dec!(7));
-        tx.add_change("Assets::Cash".to_owned(), dec!(-2));
+        let mut tx = Transaction::new(
+            NaiveDate::from_ymd(2020, 01, 10),
+            "Test transaction".to_owned(),
+        );
+        tx.add_change("Expenses::Food", Amount("€".to_owned(), dec!(7)));
+        tx.add_change("Expenses::Food", Amount("CZK".to_owned(), dec!(500)));
+        tx.add_change("Assets::Cash", Amount("€".to_owned(), dec!(-2)));
+        tx.add_change("Assets::Cash", Amount("CZK".to_owned(), dec!(-400)));
         tx.finalize("Assets::Account".to_owned());
-        assert_eq!(tx.changes["Assets::Account"], dec!(-5));
-        assert_eq!(tx.balance(), dec!(0));
+        assert_eq!(
+            tx.changes["Assets::Account"],
+            vec![
+                Amount("€".to_owned(), dec!(-5)),
+                Amount("CZK".to_owned(), dec!(-100))
+            ]
+        );
+        assert_eq!(
+            tx.balance(),
+            vec![
+                Amount("CZK".to_owned(), dec!(0)),
+                Amount("€".to_owned(), dec!(0))
+            ]
+        );
     }
 }

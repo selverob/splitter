@@ -1,3 +1,5 @@
+use crate::transaction::Amount;
+use crate::transaction::Transaction;
 use anyhow::anyhow;
 use anyhow::Result;
 use lazy_static::lazy_static;
@@ -6,12 +8,9 @@ use rust_decimal::Decimal;
 use std::str::FromStr;
 
 #[derive(Clone, Debug, PartialEq)]
-pub struct Amount<'a>(&'a str, Decimal);
-
-#[derive(Clone, Debug, PartialEq)]
 pub enum Operation<'a> {
-    AddSimpleChange(&'a str, Amount<'a>),
-    AddSplitChange(&'a str, &'a str, Amount<'a>),
+    AddSimpleChange(&'a str, Amount),
+    AddSplitChange(&'a str, &'a str, Amount),
     Finalize(&'a str),
 }
 
@@ -68,12 +67,12 @@ impl<'a> Parser<'a> {
         let op = match self.op_type.unwrap() {
             OperationType::AddSimple => Operation::AddSimpleChange(
                 self.accounts[0],
-                Amount(self.currency.unwrap(), self.amount.unwrap()),
+                Amount(self.currency.unwrap().to_owned(), self.amount.unwrap()),
             ),
             OperationType::AddSplit => Operation::AddSplitChange(
                 self.accounts[0],
                 self.accounts[1],
-                Amount(self.currency.unwrap(), self.amount.unwrap()),
+                Amount(self.currency.unwrap().to_owned(), self.amount.unwrap()),
             ),
             OperationType::Finalize => Operation::Finalize(self.accounts[0]),
         };
@@ -99,7 +98,8 @@ impl<'a> Parser<'a> {
 
     fn parse_account(&mut self, word: &'a str) -> Result<()> {
         lazy_static! {
-            static ref ACC_RE: Regex = Regex::new("\\p{L}([\\p{L}[:digit:]:])*").unwrap();
+            static ref ACC_RE: Regex =
+                Regex::new("[\\p{L}&&[^:digit:]]([\\p{L}[:digit:]:])*").unwrap();
         }
         if ACC_RE.is_match(word) {
             self.accounts.push(word);
