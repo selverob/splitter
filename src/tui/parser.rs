@@ -1,5 +1,4 @@
 use crate::transaction::Amount;
-use crate::transaction::Transaction;
 use anyhow::anyhow;
 use anyhow::Result;
 use lazy_static::lazy_static;
@@ -99,7 +98,7 @@ impl<'a> Parser<'a> {
     fn parse_account(&mut self, word: &'a str) -> Result<()> {
         lazy_static! {
             static ref ACC_RE: Regex =
-                Regex::new("[\\p{L}&&[^:digit:]]([\\p{L}[:digit:]:])*").unwrap();
+                Regex::new("^[\\p{L}&&[^:digit:]][\\p{L}[:digit:]:]*$").unwrap();
         }
         if ACC_RE.is_match(word) {
             self.accounts.push(word);
@@ -118,12 +117,12 @@ impl<'a> Parser<'a> {
 
     fn parse_currency(&mut self, word: &'a str) -> Result<()> {
         lazy_static! {
-            static ref CURR_RE: Regex = Regex::new("[^0-9]+").unwrap();
+            static ref CURR_RE: Regex = Regex::new("^[^0-9]+$").unwrap();
         }
         if CURR_RE.is_match(word) {
             self.currency = Some(word);
         } else {
-            return Err(anyhow!("Curreny contains invalid characters"));
+            return Err(anyhow!("Currency contains invalid characters"));
         }
         self.next = TokenType::Amount;
         Ok(())
@@ -133,5 +132,90 @@ impl<'a> Parser<'a> {
         self.amount = Some(Decimal::from_str(word)?);
         self.next = TokenType::EOL;
         Ok(())
+    }
+}
+
+mod test {
+    use super::*;
+    use rust_decimal_macros::*;
+
+    #[test]
+    fn parse_simple() {
+        let line = vec!["a", "Expenses", "€", "12.34"];
+        let mut parser = Parser::new();
+        assert_eq!(parser.next, TokenType::Operation);
+        assert!(parser.parse_word(line[0]).is_ok());
+        assert_eq!(parser.next, TokenType::Account);
+        assert!(parser.parse_word(line[1]).is_ok());
+        assert_eq!(parser.next, TokenType::Currency);
+        assert!(parser.parse_word(line[2]).is_ok());
+        assert_eq!(parser.next, TokenType::Amount);
+        assert!(parser.parse_word(line[3]).is_ok());
+        assert_eq!(parser.next, TokenType::EOL);
+        assert!(parser.parse_word("blah").is_err());
+        assert_eq!(
+            parser.operation().unwrap(),
+            Operation::AddSimpleChange("Expenses", Amount("€".to_owned(), dec!(12.34)))
+        );
+    }
+
+    #[test]
+    fn parse_split() {
+        let line = vec!["s", "Expenses", "Debts:Peter", "CZK", "120.50"];
+        let mut parser = Parser::new();
+        assert_eq!(parser.next, TokenType::Operation);
+        assert!(parser.parse_word(line[0]).is_ok());
+        assert_eq!(parser.next, TokenType::Account);
+        assert!(parser.parse_word(line[1]).is_ok());
+        assert_eq!(parser.next, TokenType::Account);
+        assert!(parser.parse_word(line[2]).is_ok());
+        assert_eq!(parser.next, TokenType::Currency);
+        assert!(parser.parse_word(line[3]).is_ok());
+        assert_eq!(parser.next, TokenType::Amount);
+        assert!(parser.parse_word(line[4]).is_ok());
+        assert_eq!(parser.next, TokenType::EOL);
+        assert!(parser.parse_word("blah").is_err());
+        assert_eq!(
+            parser.operation().unwrap(),
+            Operation::AddSplitChange(
+                "Expenses",
+                "Debts:Peter",
+                Amount("CZK".to_owned(), dec!(120.50))
+            )
+        );
+    }
+
+    #[test]
+    fn parse_finalize() {
+        let line = vec!["f", "Accounts:Checking"];
+        let mut parser = Parser::new();
+        assert_eq!(parser.next, TokenType::Operation);
+        assert!(parser.parse_word(line[0]).is_ok());
+        assert_eq!(parser.next, TokenType::Account);
+        assert!(parser.parse_word(line[1]).is_ok());
+        assert_eq!(parser.next, TokenType::EOL);
+        assert!(parser.parse_word("blah").is_err());
+        assert_eq!(
+            parser.operation().unwrap(),
+            Operation::Finalize("Accounts:Checking")
+        );
+    }
+
+    #[test]
+    fn test_errors() {
+        let mut parser = Parser::new();
+        assert!(parser.parse_word("x").is_err());
+        assert!(parser.parse_word("a").is_ok());
+        assert!(parser.parse_word("123").is_err());
+        assert!(parser.parse_word("1checking").is_err());
+        assert!(parser.parse_word("Expenses").is_ok());
+        assert!(parser.parse_word("123").is_err());
+        assert!(parser.parse_word("€").is_ok());
+        assert!(parser.parse_word("1a2b").is_err());
+        assert!(parser.parse_word("12.30").is_ok());
+        assert_eq!(
+            parser.operation().unwrap(),
+            Operation::AddSimpleChange("Expenses", Amount("€".to_owned(), dec!(12.30)))
+        );
     }
 }
