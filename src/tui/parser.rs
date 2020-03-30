@@ -1,6 +1,7 @@
-use crate::transaction::Amount;
+use crate::transaction::{Amount, Transaction};
 use anyhow::anyhow;
 use anyhow::Result;
+use chrono::NaiveDate;
 use lazy_static::lazy_static;
 use regex::Regex;
 use rust_decimal::Decimal;
@@ -13,8 +14,20 @@ pub enum Operation<'a> {
     Finalize(&'a str),
 }
 
+impl<'a> Operation<'a> {
+    pub fn add_to_transation(self, tx: &mut Transaction) {
+        match self {
+            Operation::AddSimpleChange(account, amount) => tx.add_change(account, amount),
+            Operation::AddSplitChange(account1, account2, amount) => {
+                tx.add_split_change(account1, account2, amount)
+            }
+            Operation::Finalize(account) => tx.finalize(account),
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum TokenType {
+pub enum TokenType {
     Operation,
     Account,
     Currency,
@@ -41,7 +54,7 @@ impl OperationType {
 }
 
 pub struct Parser<'a> {
-    next: TokenType,
+    pub next: TokenType,
     op_type: Option<OperationType>,
     accounts: Vec<&'a str>,
     currency: Option<&'a str>,
@@ -135,6 +148,16 @@ impl<'a> Parser<'a> {
     }
 }
 
+pub fn parse_transaction_header(line: &str) -> Result<Transaction> {
+    let fields: Vec<&str> = line.split_ascii_whitespace().collect();
+    if fields.len() == 0 {
+        return Err(anyhow!("No transaction header provided"));
+    }
+    let date: NaiveDate = fields[0].parse()?;
+    let description = fields[1..fields.len()].join(" ");
+    Ok(Transaction::new(date, description))
+}
+
 mod test {
     use super::*;
     use rust_decimal_macros::*;
@@ -217,5 +240,12 @@ mod test {
             parser.operation().unwrap(),
             Operation::AddSimpleChange("Expenses", Amount("€".to_owned(), dec!(12.30)))
         );
+    }
+
+    #[test]
+    fn tx_header() {
+        let tx = parse_transaction_header("2020-02-27 Test transaction").unwrap();
+        assert_eq!(tx.date, NaiveDate::from_ymd(2020, 2, 27));
+        assert_eq!(tx.description, "Test transaction");
     }
 }

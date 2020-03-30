@@ -2,18 +2,20 @@ use chrono::NaiveDate;
 use rust_decimal::Decimal;
 use rust_decimal_macros::*;
 use std::collections::HashMap;
+use std::fmt;
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Amount(pub String, pub Decimal);
 
+#[derive(Debug, PartialEq, Clone)]
 pub struct Transaction {
-    date: NaiveDate,
-    description: String,
-    changes: HashMap<String, Vec<Amount>>,
+    pub date: NaiveDate,
+    pub description: String,
+    pub changes: HashMap<String, Vec<Amount>>,
 }
 
 impl Transaction {
-    fn new(date: NaiveDate, description: String) -> Transaction {
+    pub fn new(date: NaiveDate, description: String) -> Transaction {
         Transaction {
             date,
             description,
@@ -21,7 +23,7 @@ impl Transaction {
         }
     }
 
-    fn add_change(&mut self, account: &str, amount: Amount) {
+    pub fn add_change(&mut self, account: &str, amount: Amount) {
         self.changes
             .entry(account.to_owned())
             .and_modify(|v| {
@@ -35,13 +37,13 @@ impl Transaction {
             .or_insert(vec![amount]);
     }
 
-    fn add_split_change(&mut self, account: &str, split_account: &str, amount: Amount) {
+    pub fn add_split_change(&mut self, account: &str, split_account: &str, amount: Amount) {
         let half = Amount(amount.0, amount.1 / dec!(2));
         self.add_change(account, half.clone());
         self.add_change(split_account, half);
     }
 
-    fn balance(&self) -> Vec<Amount> {
+    pub fn balance(&self) -> Vec<Amount> {
         let mut balances = HashMap::new();
         for amounts in self.changes.values() {
             for amount in amounts {
@@ -59,10 +61,44 @@ impl Transaction {
         balance_vec
     }
 
-    fn finalize(&mut self, account: String) {
+    pub fn finalize(&mut self, account: &str) {
         for amount in self.balance() {
-            self.add_change(&account, Amount(amount.0, -amount.1));
+            self.add_change(account, Amount(amount.0, -amount.1));
         }
+    }
+
+    fn amounts(&self) -> Vec<(&str, &Amount)> {
+        let mut amount_vec = Vec::new();
+        for (account, amounts) in &self.changes {
+            for amount in amounts {
+                amount_vec.push((account.as_ref(), amount));
+            }
+        }
+        amount_vec
+    }
+}
+
+impl fmt::Display for Transaction {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        writeln!(
+            f,
+            "{} {}",
+            self.date.format("%Y-%m-%d").to_string(),
+            self.description
+        )?;
+        let (mut credits, mut debits): (Vec<(&str, &Amount)>, Vec<(&str, &Amount)>) = self
+            .amounts()
+            .iter()
+            .partition(|amount_triple| (amount_triple.1).1 >= dec!(0));
+        credits.sort_by_key(|amount_triple| amount_triple.0);
+        debits.sort_by_key(|amount_triple| amount_triple.0);
+        for (account, amount) in credits {
+            writeln!(f, "\t{}\t{} {}", account, amount.0, amount.1)?;
+        }
+        for (account, amount) in debits {
+            writeln!(f, "\t{}\t{} {}", account, amount.0, amount.1)?;
+        }
+        Ok(())
     }
 }
 
@@ -165,7 +201,7 @@ mod test {
         tx.add_change("Expenses::Food", Amount("CZK".to_owned(), dec!(500)));
         tx.add_change("Assets::Cash", Amount("€".to_owned(), dec!(-2)));
         tx.add_change("Assets::Cash", Amount("CZK".to_owned(), dec!(-400)));
-        tx.finalize("Assets::Account".to_owned());
+        tx.finalize("Assets::Account");
         assert_eq!(
             tx.changes["Assets::Account"],
             vec![
