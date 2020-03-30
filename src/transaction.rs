@@ -3,6 +3,7 @@ use rust_decimal::Decimal;
 use rust_decimal_macros::*;
 use std::collections::HashMap;
 use std::fmt;
+use std::iter::once;
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Amount(pub String, pub Decimal);
@@ -86,17 +87,27 @@ impl fmt::Display for Transaction {
             self.date.format("%Y-%m-%d").to_string(),
             self.description
         )?;
-        let (mut credits, mut debits): (Vec<(&str, &Amount)>, Vec<(&str, &Amount)>) = self
+        let amounts = self.amounts();
+        let max_account_name_len = self
             .amounts()
+            .iter()
+            .map(|(account, _)| account.chars().count())
+            .max();
+        if max_account_name_len.is_none() {
+            return Ok(());
+        }
+        let (mut credits, mut debits): (Vec<(&str, &Amount)>, Vec<(&str, &Amount)>) = amounts
             .iter()
             .partition(|amount_triple| (amount_triple.1).1 >= dec!(0));
         credits.sort_by_key(|amount_triple| amount_triple.0);
         debits.sort_by_key(|amount_triple| amount_triple.0);
-        for (account, amount) in credits {
-            writeln!(f, "\t{}\t{} {}", account, amount.0, amount.1)?;
-        }
-        for (account, amount) in debits {
-            writeln!(f, "\t{}\t{} {}", account, amount.0, amount.1)?;
+        for (account, amount) in credits.iter().chain(debits.iter()) {
+            let justification_spaces_count =
+                max_account_name_len.unwrap() - account.chars().count();
+            let spaces: String = once(' ').cycle().take(justification_spaces_count).collect();
+            let mut justified_account = account.to_string();
+            justified_account.push_str(&spaces);
+            writeln!(f, "\t{} {} {}", justified_account, amount.0, amount.1)?;
         }
         Ok(())
     }
