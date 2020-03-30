@@ -2,9 +2,10 @@ mod parser;
 
 use std::borrow::Cow::{self, Borrowed, Owned};
 
+use crate::ledger::get_accounts;
 use crate::transaction::Transaction;
 
-use rustyline::completion::{Completer, FilenameCompleter, Pair};
+use rustyline::completion::{extract_word, Completer};
 use rustyline::config::OutputStreamType;
 use rustyline::error::ReadlineError;
 use rustyline::highlight::{Highlighter, MatchingBracketHighlighter};
@@ -16,22 +17,38 @@ use anyhow::Result;
 
 #[derive(Helper, Validator)]
 struct MyHelper {
-    completer: FilenameCompleter,
-    highlighter: MatchingBracketHighlighter,
     hinter: HistoryHinter,
+    highlighter: MatchingBracketHighlighter,
     colored_prompt: String,
 }
 
 impl Completer for MyHelper {
-    type Candidate = Pair;
+    type Candidate = String;
 
     fn complete(
         &self,
         line: &str,
         pos: usize,
-        ctx: &Context<'_>,
-    ) -> Result<(usize, Vec<Pair>), ReadlineError> {
-        self.completer.complete(line, pos, ctx)
+        _: &Context<'_>,
+    ) -> Result<(usize, Vec<String>), ReadlineError> {
+        // The only supported separator is a space, ASCII 32.
+        let (word_start, word_to_complete) = extract_word(line, pos, None, &[32u8][..]);
+        let words: Vec<&str> = line.split_ascii_whitespace().collect();
+        let mut p = parser::Parser::new();
+        let mut parsed_characters = 0usize;
+        for word in words {
+            parsed_characters += word.len() + 1;
+            if parsed_characters > word_start {
+                break;
+            }
+            if p.parse_word(word).is_err() {
+                return Ok((0, vec![]));
+            }
+        }
+        if p.next != parser::TokenType::Account {
+            return Ok((0, vec![]));
+        }
+        Ok((word_start, get_accounts(word_to_complete)?))
     }
 }
 
@@ -75,7 +92,6 @@ pub fn run() -> rustyline::Result<()> {
         .output_stream(OutputStreamType::Stdout)
         .build();
     let h = MyHelper {
-        completer: FilenameCompleter::new(),
         highlighter: MatchingBracketHighlighter::new(),
         hinter: HistoryHinter {},
         colored_prompt: "".to_owned(),
