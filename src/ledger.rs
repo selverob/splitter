@@ -12,7 +12,7 @@ pub fn get_accounts(pattern: &str) -> Result<Vec<String>> {
 fn process_ledger_output(out: Output) -> Result<Vec<String>> {
     let str_output = String::from_utf8(out.stdout)?;
     Ok(str_output
-        .split("\n")
+        .split('\n')
         .filter(|s| s != &"")
         .map(|s| s.to_owned())
         .collect())

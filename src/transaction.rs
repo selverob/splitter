@@ -28,7 +28,7 @@ impl Transaction {
             .entry(account.to_owned())
             .and_modify(|v| {
                 if let Some(pos) = v.iter().position(|am| am.0 == amount.0) {
-                    v[pos].1 = v[pos].1 + amount.1;
+                    v[pos].1 += amount.1;
                 } else {
                     v.push(amount.clone());
                     v.sort();
@@ -103,6 +103,7 @@ impl fmt::Display for Transaction {
 }
 
 mod test {
+    #[allow(unused_imports)]
     use super::*;
 
     #[test]

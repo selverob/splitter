@@ -150,7 +150,7 @@ impl<'a> Parser<'a> {
 
 pub fn parse_transaction_header(line: &str) -> Result<Transaction> {
     let fields: Vec<&str> = line.split_ascii_whitespace().collect();
-    if fields.len() == 0 {
+    if fields.is_empty() {
         return Err(anyhow!("No transaction header provided"));
     }
     let date: NaiveDate = fields[0].parse()?;
@@ -159,7 +159,9 @@ pub fn parse_transaction_header(line: &str) -> Result<Transaction> {
 }
 
 mod test {
+    #[allow(unused_imports)]
     use super::*;
+    #[allow(unused_imports)]
     use rust_decimal_macros::*;
 
     #[test]

@@ -12,9 +12,7 @@ use rustyline::hint::{Hinter, HistoryHinter};
 use rustyline::{Cmd, CompletionType, Config, Context, EditMode, Editor, KeyPress};
 use rustyline_derive::{Helper, Validator};
 
-use anyhow::anyhow;
 use anyhow::Result;
-use rust_decimal::Decimal;
 
 #[derive(Helper, Validator)]
 struct MyHelper {
