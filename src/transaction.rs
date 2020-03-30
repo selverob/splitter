@@ -3,7 +3,7 @@ use rust_decimal::Decimal;
 use rust_decimal_macros::*;
 use std::collections::HashMap;
 
-#[derive(Clone, Debug, PartialEq)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord)]
 pub struct Amount(pub String, pub Decimal);
 
 pub struct Transaction {
@@ -29,6 +29,7 @@ impl Transaction {
                     v[pos].1 = v[pos].1 + amount.1;
                 } else {
                     v.push(amount.clone());
+                    v.sort();
                 }
             })
             .or_insert(vec![amount]);
@@ -50,10 +51,12 @@ impl Transaction {
                     .or_insert(amount.1);
             }
         }
-        balances
+        let mut balance_vec: Vec<Amount> = balances
             .iter()
             .map(|(currency, balance)| Amount(currency.to_string(), *balance))
-            .collect()
+            .collect();
+        balance_vec.sort();
+        balance_vec
     }
 
     fn finalize(&mut self, account: String) {
@@ -92,22 +95,22 @@ mod test {
         assert_eq!(
             tx.changes["Expenses::Food"],
             vec![
-                Amount("€".to_owned(), dec!(7.95)),
-                Amount("CZK".to_owned(), dec!(120))
+                Amount("CZK".to_owned(), dec!(120)),
+                Amount("€".to_owned(), dec!(7.95))
             ]
         );
         assert_eq!(
             tx.changes["Expenses::Hygiene"],
             vec![
-                Amount("€".to_owned(), dec!(3.90)),
-                Amount("CZK".to_owned(), dec!(38))
+                Amount("CZK".to_owned(), dec!(38)),
+                Amount("€".to_owned(), dec!(3.90))
             ]
         );
         assert_eq!(
             tx.balance(),
             vec![
-                Amount("€".to_owned(), dec!(11.85)),
-                Amount("CZK".to_owned(), dec!(158))
+                Amount("CZK".to_owned(), dec!(158)),
+                Amount("€".to_owned(), dec!(11.85))
             ]
         );
     }
@@ -132,22 +135,22 @@ mod test {
         assert_eq!(
             tx.changes["Expenses::Food"],
             vec![
-                Amount("€".to_owned(), dec!(5.50)),
-                Amount("CZK".to_owned(), dec!(60))
+                Amount("CZK".to_owned(), dec!(60)),
+                Amount("€".to_owned(), dec!(5.50))
             ]
         );
         assert_eq!(
             tx.changes["Debts::Peter"],
             vec![
-                Amount("€".to_owned(), dec!(3.50)),
-                Amount("CZK".to_owned(), dec!(60))
+                Amount("CZK".to_owned(), dec!(60)),
+                Amount("€".to_owned(), dec!(3.50))
             ]
         );
         assert_eq!(
             tx.balance(),
             vec![
-                Amount("€".to_owned(), dec!(9)),
-                Amount("CZK".to_owned(), dec!(120))
+                Amount("CZK".to_owned(), dec!(120)),
+                Amount("€".to_owned(), dec!(9))
             ]
         )
     }
@@ -166,8 +169,8 @@ mod test {
         assert_eq!(
             tx.changes["Assets::Account"],
             vec![
-                Amount("€".to_owned(), dec!(-5)),
-                Amount("CZK".to_owned(), dec!(-100))
+                Amount("CZK".to_owned(), dec!(-100)),
+                Amount("€".to_owned(), dec!(-5))
             ]
         );
         assert_eq!(
