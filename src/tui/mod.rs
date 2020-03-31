@@ -16,13 +16,23 @@ use rustyline_derive::{Helper, Validator};
 use anyhow::Result;
 
 #[derive(Helper, Validator)]
-struct MyHelper {
+struct TUIHelper {
     hinter: HistoryHinter,
     highlighter: MatchingBracketHighlighter,
     colored_prompt: String,
 }
 
-impl Completer for MyHelper {
+impl TUIHelper {
+    fn new() -> TUIHelper {
+        TUIHelper {
+            highlighter: MatchingBracketHighlighter::new(),
+            hinter: HistoryHinter {},
+            colored_prompt: "".to_owned(),
+        }
+    }
+}
+
+impl Completer for TUIHelper {
     type Candidate = String;
 
     fn complete(
@@ -52,13 +62,13 @@ impl Completer for MyHelper {
     }
 }
 
-impl Hinter for MyHelper {
+impl Hinter for TUIHelper {
     fn hint(&self, line: &str, pos: usize, ctx: &Context<'_>) -> Option<String> {
         self.hinter.hint(line, pos, ctx)
     }
 }
 
-impl Highlighter for MyHelper {
+impl Highlighter for TUIHelper {
     fn highlight_prompt<'b, 's: 'b, 'p: 'b>(
         &'s self,
         prompt: &'p str,
@@ -84,82 +94,94 @@ impl Highlighter for MyHelper {
     }
 }
 
-pub fn run() -> rustyline::Result<()> {
-    let config = Config::builder()
-        .history_ignore_space(true)
-        .completion_type(CompletionType::List)
-        .edit_mode(EditMode::Emacs)
-        .output_stream(OutputStreamType::Stdout)
-        .build();
-    let h = MyHelper {
-        highlighter: MatchingBracketHighlighter::new(),
-        hinter: HistoryHinter {},
-        colored_prompt: "".to_owned(),
-    };
-    let mut rl = Editor::with_config(config);
-    rl.set_helper(Some(h));
-    rl.bind_sequence(KeyPress::Meta('N'), Cmd::HistorySearchForward);
-    rl.bind_sequence(KeyPress::Meta('P'), Cmd::HistorySearchBackward);
-    if rl.load_history("history.txt").is_err() {
-        println!("No previous history.");
-    }
-    let mut tx_out: Option<Transaction> = None;
-    loop {
-        let tx = &mut tx_out;
-        let p = if tx.is_none() {
-            "header> ".to_owned()
-        } else {
-            "change> ".to_owned()
-        };
-        rl.helper_mut().expect("No helper").colored_prompt = format!("\x1b[1;32m{}\x1b[0m", p);
-        let readline = rl.readline(&p);
-        match readline {
-            Ok(line) => {
-                rl.add_history_entry(line.clone());
-                let trimmed = line.trim();
-                if tx.is_none() {
-                    match parser::parse_transaction_header(trimmed) {
-                        Ok(transaction) => tx_out = Some(transaction),
-                        Err(err) => println!("{}", err),
-                    };
-                } else {
-                    if trimmed == "" {
-                        print!("{}", tx.as_ref().unwrap());
-                        tx_out = None;
-                        continue;
-                    }
-                    let mut p = parser::Parser::new();
-                    for word in line.split_ascii_whitespace() {
-                        let result = p.parse_word(word);
-                        if let Err(err) = result {
-                            println!("{}", err);
-                            continue;
-                        }
-                    }
-                    if p.next != parser::TokenType::EOL {
-                        println!("Invalid change command, expecting {:?}", p.next);
-                        continue;
-                    } else {
-                        p.operation()
-                            .unwrap()
-                            .add_to_transation(&mut tx.as_mut().unwrap());
-                    }
-                }
-                continue;
-            }
-            Err(ReadlineError::Interrupted) => {
-                println!("CTRL-C");
-                break;
-            }
-            Err(ReadlineError::Eof) => {
-                println!("CTRL-D");
-                break;
-            }
-            Err(err) => {
-                println!("Error: {:?}", err);
-                break;
-            }
+pub struct TUIController {
+    current_tx: Option<Transaction>,
+    editor: rustyline::Editor<TUIHelper>,
+}
+
+impl TUIController {
+    pub fn new() -> TUIController {
+        let editor_config = Config::builder()
+            .history_ignore_space(true)
+            .completion_type(CompletionType::List)
+            .edit_mode(EditMode::Emacs)
+            .output_stream(OutputStreamType::Stdout)
+            .build();
+        let mut editor = Editor::with_config(editor_config);
+        editor.set_helper(Some(TUIHelper::new()));
+        editor.bind_sequence(KeyPress::Meta('N'), Cmd::HistorySearchForward);
+        editor.bind_sequence(KeyPress::Meta('P'), Cmd::HistorySearchBackward);
+        if editor.load_history("history.txt").is_err() {
+            println!("No previous history.");
+        }
+        TUIController {
+            current_tx: None,
+            editor,
         }
     }
-    rl.save_history("history.txt")
+
+    pub fn run(&mut self) -> rustyline::Result<()> {
+        loop {
+            let p = if self.current_tx.is_none() {
+                "header> ".to_owned()
+            } else {
+                "change> ".to_owned()
+            };
+            self.editor.helper_mut().expect("No helper").colored_prompt =
+                format!("\x1b[1;32m{}\x1b[0m", p);
+            let line = self.editor.readline(&p);
+            match line {
+                Ok(line) => {
+                    self.editor.add_history_entry(line.clone());
+                    let trimmed = line.trim();
+                    if self.current_tx.is_none() {
+                        self.parse_header(&trimmed);
+                    } else {
+                        self.parse_change(&trimmed);
+                    }
+                }
+                Err(ReadlineError::Interrupted) => {
+                    break;
+                }
+                Err(ReadlineError::Eof) => {
+                    break;
+                }
+                Err(err) => {
+                    println!("Error: {:?}", err);
+                    break;
+                }
+            }
+        }
+        self.editor.save_history("history.txt")
+    }
+
+    fn parse_header(&mut self, line: &str) {
+        match parser::parse_transaction_header(line) {
+            Ok(transaction) => self.current_tx = Some(transaction),
+            Err(err) => println!("{}", err),
+        };
+    }
+
+    fn parse_change(&mut self, line: &str) {
+        if line == "" {
+            print!("{}", self.current_tx.as_ref().unwrap());
+            self.current_tx = None;
+            return;
+        }
+        let mut p = parser::Parser::new();
+        for word in line.split_ascii_whitespace() {
+            let result = p.parse_word(word);
+            if let Err(err) = result {
+                println!("{}", err);
+                continue;
+            }
+        }
+        if p.next != parser::TokenType::EOL {
+            println!("Invalid change command, expecting {:?}", p.next);
+        } else {
+            p.operation()
+                .unwrap()
+                .add_to_transation(&mut self.current_tx.as_mut().unwrap());
+        }
+    }
 }
