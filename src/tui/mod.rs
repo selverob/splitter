@@ -2,7 +2,7 @@ mod parser;
 
 use std::borrow::Cow::{self, Borrowed, Owned};
 
-use crate::ledger::{get_accounts, write_transaction};
+use crate::ledger::{get_accounts, get_commodities, write_transaction};
 use crate::transaction::Transaction;
 
 use rustyline::completion::{extract_word, Completer};
@@ -32,6 +32,23 @@ impl TUIHelper {
             colored_prompt: "".to_owned(),
         }
     }
+
+    fn expected_token(&self, line: &str, word_start: usize) -> Option<parser::TokenType> {
+        // The only supported separator is a space, ASCII 32.
+        let words: Vec<&str> = line.split_ascii_whitespace().collect();
+        let mut p = parser::Parser::new();
+        let mut parsed_characters = 0usize;
+        for word in words {
+            parsed_characters += word.len() + 1;
+            if parsed_characters > word_start {
+                break;
+            }
+            if p.parse_word(word).is_err() {
+                return None;
+            }
+        }
+        Some(p.next)
+    }
 }
 
 impl Completer for TUIHelper {
@@ -43,27 +60,18 @@ impl Completer for TUIHelper {
         pos: usize,
         _: &Context<'_>,
     ) -> Result<(usize, Vec<String>), ReadlineError> {
-        // The only supported separator is a space, ASCII 32.
         let (word_start, word_to_complete) = extract_word(line, pos, None, &[32u8][..]);
-        let words: Vec<&str> = line.split_ascii_whitespace().collect();
-        let mut p = parser::Parser::new();
-        let mut parsed_characters = 0usize;
-        for word in words {
-            parsed_characters += word.len() + 1;
-            if parsed_characters > word_start {
-                break;
-            }
-            if p.parse_word(word).is_err() {
-                return Ok((0, vec![]));
-            }
+        match self.expected_token(line, pos) {
+            Some(parser::TokenType::Account) => Ok((
+                word_start,
+                get_accounts(&self.path_to_ledger, word_to_complete)?,
+            )),
+            Some(parser::TokenType::Currency) => Ok((
+                word_start,
+                get_commodities(&self.path_to_ledger, word_to_complete)?,
+            )),
+            _ => Ok((0, vec![])),
         }
-        if p.next != parser::TokenType::Account {
-            return Ok((0, vec![]));
-        }
-        Ok((
-            word_start,
-            get_accounts(&self.path_to_ledger, word_to_complete)?,
-        ))
     }
 }
 

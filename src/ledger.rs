@@ -18,6 +18,28 @@ pub fn get_accounts(
     process_ledger_output(out)
 }
 
+pub fn get_commodities(
+    path_to_ledger_file: &str,
+    starts_with: &str,
+) -> Result<Vec<String>, ReadlineError> {
+    let out = Command::new("ledger")
+        .arg("-f")
+        .arg(path_to_ledger_file)
+        .arg("commodities")
+        .output()?;
+    let all_commodities = process_ledger_output(out)?;
+    return Ok(all_commodities
+        .iter()
+        .filter_map(|c| {
+            if c.starts_with(starts_with) {
+                Some(c.to_owned())
+            } else {
+                None
+            }
+        })
+        .collect());
+}
+
 pub fn write_transaction(path_to_ledger_file: &str, tx: &Transaction) -> io::Result<()> {
     let file = OpenOptions::new().append(true).open(path_to_ledger_file)?;
     write!(&file, "{:}\n", tx)?;
