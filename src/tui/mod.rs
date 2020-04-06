@@ -2,7 +2,7 @@ mod parser;
 
 use std::borrow::Cow::{self, Borrowed, Owned};
 
-use crate::ledger::get_accounts;
+use crate::ledger::{get_accounts, write_transaction};
 use crate::transaction::Transaction;
 
 use rustyline::completion::{extract_word, Completer};
@@ -17,14 +17,16 @@ use anyhow::Result;
 
 #[derive(Helper, Validator)]
 struct TUIHelper {
+    path_to_ledger: String,
     hinter: HistoryHinter,
     highlighter: MatchingBracketHighlighter,
     colored_prompt: String,
 }
 
 impl TUIHelper {
-    fn new() -> TUIHelper {
+    fn new(path_to_ledger: String) -> TUIHelper {
         TUIHelper {
+            path_to_ledger,
             highlighter: MatchingBracketHighlighter::new(),
             hinter: HistoryHinter {},
             colored_prompt: "".to_owned(),
@@ -58,7 +60,10 @@ impl Completer for TUIHelper {
         if p.next != parser::TokenType::Account {
             return Ok((0, vec![]));
         }
-        Ok((word_start, get_accounts(word_to_complete)?))
+        Ok((
+            word_start,
+            get_accounts(&self.path_to_ledger, word_to_complete)?,
+        ))
     }
 }
 
@@ -95,12 +100,13 @@ impl Highlighter for TUIHelper {
 }
 
 pub struct TUIController {
+    path_to_ledger: String,
     current_tx: Option<Transaction>,
     editor: rustyline::Editor<TUIHelper>,
 }
 
 impl TUIController {
-    pub fn new() -> TUIController {
+    pub fn new(path_to_ledger: String) -> TUIController {
         let editor_config = Config::builder()
             .history_ignore_space(true)
             .completion_type(CompletionType::List)
@@ -108,7 +114,7 @@ impl TUIController {
             .output_stream(OutputStreamType::Stdout)
             .build();
         let mut editor = Editor::with_config(editor_config);
-        editor.set_helper(Some(TUIHelper::new()));
+        editor.set_helper(Some(TUIHelper::new(path_to_ledger.clone())));
         editor.bind_sequence(KeyPress::Meta('N'), Cmd::HistorySearchForward);
         editor.bind_sequence(KeyPress::Meta('P'), Cmd::HistorySearchBackward);
         if editor.load_history("history.txt").is_err() {
@@ -117,6 +123,7 @@ impl TUIController {
         TUIController {
             current_tx: None,
             editor,
+            path_to_ledger,
         }
     }
 
@@ -164,7 +171,11 @@ impl TUIController {
 
     fn parse_change(&mut self, line: &str) {
         if line == "" {
-            print!("{}", self.current_tx.as_ref().unwrap());
+            let tx_ref = self.current_tx.as_ref().unwrap();
+            print!("{}", tx_ref);
+            if let Err(err) = write_transaction(&self.path_to_ledger, tx_ref) {
+                println!("Error when saving the transaction: {}", err);
+            }
             self.current_tx = None;
             return;
         }
