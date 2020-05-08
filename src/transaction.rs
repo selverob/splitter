@@ -107,7 +107,7 @@ impl fmt::Display for Transaction {
             let spaces: String = once(' ').cycle().take(justification_spaces_count).collect();
             let mut justified_account = account.to_string();
             justified_account.push_str(&spaces);
-            writeln!(f, "\t{} {} {}", justified_account, amount.0, amount.1)?;
+            writeln!(f, "\t{}  {} {}", justified_account, amount.0, amount.1)?;
         }
         Ok(())
     }

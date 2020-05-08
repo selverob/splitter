@@ -25,3 +25,27 @@ simply add this kind of split transactions.
 
 Usage
 ---------
+Start splitter with a single argument, path to your Ledger file (automatic
+loading based on ledger config is not yet implemented). Then you can enter
+transactions. Each transaction begins with a standard header, similar to the
+Ledger one:
+
+```
+2020-03-02 Transaction description
+````
+
+Then you can enter commands. There are three commands:
+* `a <Account Name> <Currency> <Amount>` - Adds or subtracts the amount from the
+  given account
+* `s <Account Name> <Account Name> <Currency> <Amount>` - Splits the amount in
+  half and adds or subtracts the halves from the given accounts
+* `f <Account Name>` - Finalizes (balances) the transaction, adding or
+  subtracting the remaining amount from the given account
+
+Transaction entry can be finalized by entering an empty line. The transaction is
+then saved into the file. The CLI supports currency and account name
+autocompletion, triggered by Tab.
+
+WARNING: Transaction saving is not yet tested completely. I recommend versioning
+your Ledger in Git or backing it up, since it's possible it will get wrecked by
+the transaction positioning logic.
